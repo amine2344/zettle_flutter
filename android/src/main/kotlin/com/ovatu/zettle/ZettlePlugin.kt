@@ -197,29 +197,42 @@ class ZettlePlugin: FlutterPlugin, MethodCallHandler, ActivityAware {
     }
   }
 
-  private fun requestPayment(@NonNull args: Map<*, *>) {
+  private fun requestPayment(@NonNull args: Map<*, *>, result: Result) {
+    if (!::activity.isInitialized) {
+        Log.e(tag, "Activity not initialized in requestPayment")
+        result.error("NO_ACTIVITY", "Activity not initialized", null)
+        return
+    }
     Log.d(tag, "requestPayment: $args")
 
     val internalUniqueTraceId = args["reference"] as String
-    val reference = TransactionReference.Builder(internalUniqueTraceId)
-      .build()
+    val reference = TransactionReference.Builder(internalUniqueTraceId).build()
 
     val amount = (((args["amount"] as Double) * 100).toInt()).toLong()
     val enableTipping = args["enableTipping"] as? Boolean ?: true
     val enableInstalments = args["enableInstalments"] as? Boolean ?: false
 
-    // Configure tipping based on the enableTipping parameter
     val tippingConfiguration = if (enableTipping) {
-      TippingConfiguration(
-        ZettleReaderTippingStyle.Default,
-        PayPalReaderTippingStyle.SDKConfigured
-      )
+        TippingConfiguration(
+            ZettleReaderTippingStyle.Default,
+            PayPalReaderTippingStyle.SDKConfigured
+        )
     } else {
-      TippingConfiguration(
-        ZettleReaderTippingStyle.None,
-        PayPalReaderTippingStyle.None
-      )
+        TippingConfiguration(
+            ZettleReaderTippingStyle.None,
+            PayPalReaderTippingStyle.None
+        )
     }
+
+    val intent = CardReaderAction.Payment(
+        reference = reference,
+        amount = amount,
+        tippingConfiguration = tippingConfiguration,
+        enableInstallments = enableInstalments
+    ).charge(activity)
+
+    paymentLauncher.launch(intent)
+}
 
     val intent = CardReaderAction.Payment(
       reference = reference,
