@@ -146,7 +146,9 @@ class ZettlePlugin: FlutterPlugin, MethodCallHandler, ActivityAware {
 
     when (call.method) {
       "init" -> init(call.arguments as Map<*, *>, result)
-      "requestPayment" -> requestPayment(call.arguments as Map<*, *>)
+      "requestPayment" -> requestPayment(call.arguments as Map<*, *>, result)
+
+
       "requestRefund" -> requestRefund(call.arguments as Map<*, *>)
       "showSettings" -> showSettings()
       "showTippingSettings" -> showTippingSettings()
@@ -199,9 +201,9 @@ class ZettlePlugin: FlutterPlugin, MethodCallHandler, ActivityAware {
 
   private fun requestPayment(@NonNull args: Map<*, *>, result: Result) {
     if (!::activity.isInitialized) {
-        Log.e(tag, "Activity not initialized in requestPayment")
-        result.error("NO_ACTIVITY", "Activity not initialized", null)
-        return
+      Log.e(tag, "Activity not initialized in requestPayment")
+      result.error("NO_ACTIVITY", "Activity not initialized", null)
+      return
     }
     Log.d(tag, "requestPayment: $args")
 
@@ -213,26 +215,16 @@ class ZettlePlugin: FlutterPlugin, MethodCallHandler, ActivityAware {
     val enableInstalments = args["enableInstalments"] as? Boolean ?: false
 
     val tippingConfiguration = if (enableTipping) {
-        TippingConfiguration(
-            ZettleReaderTippingStyle.Default,
-            PayPalReaderTippingStyle.SDKConfigured
-        )
+      TippingConfiguration(
+        ZettleReaderTippingStyle.Default,
+        PayPalReaderTippingStyle.SDKConfigured
+      )
     } else {
-        TippingConfiguration(
-            ZettleReaderTippingStyle.None,
-            PayPalReaderTippingStyle.None
-        )
+      TippingConfiguration(
+        ZettleReaderTippingStyle.None,
+        PayPalReaderTippingStyle.None
+      )
     }
-
-    val intent = CardReaderAction.Payment(
-        reference = reference,
-        amount = amount,
-        tippingConfiguration = tippingConfiguration,
-        enableInstallments = enableInstalments
-    ).charge(activity)
-
-    paymentLauncher.launch(intent)
-}
 
     val intent = CardReaderAction.Payment(
       reference = reference,
@@ -241,139 +233,61 @@ class ZettlePlugin: FlutterPlugin, MethodCallHandler, ActivityAware {
       enableInstallments = enableInstalments
     ).charge(activity)
 
-    // Launch using the activity result launcher
     paymentLauncher.launch(intent)
   }
 
-  private fun requestRefund(@NonNull args: Map<*, *>) {
-    Log.d(tag, "requestRefund: $args")
 
-    val paymentReferenceId = args["reference"] as String
-    val refundReference = TransactionReference.Builder(UUID.randomUUID().toString())
-      .put("REFUND_EXTRA_INFO", "Started from Flutter")
-      .build()
 
-    val refundAmount = if (args["refundAmount"] != null) {
-      (((args["refundAmount"] as Double) * 100).toInt()).toLong()
-    } else {
-      0L
-    }
+private fun requestRefund(@NonNull args: Map<*, *>) {
+  Log.d(tag, "requestRefund: $args")
 
-    val intent = CardReaderAction.Refund(
-      amount = refundAmount,
-      paymentReferenceId = paymentReferenceId,
-      refundReference = refundReference
-    ).refund(activity)
+  val paymentReferenceId = args["reference"] as String
+  val refundReference = TransactionReference.Builder(UUID.randomUUID().toString())
+    .put("REFUND_EXTRA_INFO", "Started from Flutter")
+    .build()
 
-    // Launch using the activity result launcher
-    refundLauncher.launch(intent)
+  val refundAmount = if (args["refundAmount"] != null) {
+    (((args["refundAmount"] as Double) * 100).toInt()).toLong()
+  } else {
+    0L
   }
 
-  private fun showSettings() {
-    val intent = CardReaderAction.Settings.show(activity)
-    settingsLauncher.launch(intent)
-  }
+  val intent = CardReaderAction.Refund(
+    amount = refundAmount,
+    paymentReferenceId = paymentReferenceId,
+    refundReference = refundReference
+  ).refund(activity)
 
-  private fun showTippingSettings() {
-    val intent = CardReaderAction.TippingSettings().show(activity)
-    tippingSettingsLauncher.launch(intent)
-  }
+  // Launch using the activity result launcher
+  refundLauncher.launch(intent)
+}
 
-  private fun retrieveTransaction(@NonNull args: Map<*, *>) {
-    Log.d(tag, "retrieveTransaction: $args")
+private fun showSettings() {
+  val intent = CardReaderAction.Settings.show(activity)
+  settingsLauncher.launch(intent)
+}
 
-    val referenceId = args["reference"] as String
+private fun showTippingSettings() {
+  val intent = CardReaderAction.TippingSettings().show(activity)
+  tippingSettingsLauncher.launch(intent)
+}
 
-    CardReaderAction.Transaction(referenceId).retrieve { result ->
-      when (result) {
-        is ZettleResult.Completed<*> -> {
-          val transaction = CardReaderAction.fromRetrieveTransactionResult(result)
-          val payload = transaction.payload
+private fun retrieveTransaction(@NonNull args: Map<*, *>) {
+  Log.d(tag, "retrieveTransaction: $args")
 
-          sendResult(true, mapOf(
-            "status" to "completed",
-            "amount" to payload.amount,
-            "referenceId" to payload.referenceId
-            // Add other fields you need from the payload
-          ))
-        }
-        is ZettleResult.Cancelled -> {
-          sendResult(false, mapOf("status" to "canceled"))
-        }
-        is ZettleResult.Failed -> {
-          sendResult(false, mapOf(
-            "status" to "failed",
-            "reason" to result.reason.toString()
-          ))
-        }
-      }
-    }
-  }
+  val referenceId = args["reference"] as String
 
-  private fun handlePaymentResult(result: ZettleResult?) {
+  CardReaderAction.Transaction(referenceId).retrieve { result ->
     when (result) {
       is ZettleResult.Completed<*> -> {
-        val payment: CardPaymentResult.Completed = CardReaderAction.fromPaymentResult(result)
-        val payload = payment.payload
-
-        // Create a map with all possible fields
-        val resultMap = mutableMapOf<String, Any?>(
-          "status" to "completed",
-          "amount" to (payload.amount / 100.0),
-          "gratuityAmount" to (payload.gratuityAmount?.let { it / 100.0 }),
-          "cardType" to payload.cardType,
-          "cardPaymentEntryMode" to payload.cardPaymentEntryMode?.toString(),
-          "cardholderVerificationMethod" to payload.cardholderVerificationMethod?.toString(),
-          "maskedPan" to payload.maskedPan,
-          "reference" to payload.reference?.id
-        )
-
-        // Add all optional fields that might have changed in the SDK
-        payload.tsi?.let { resultMap["tsi"] = it }
-        payload.tvr?.let { resultMap["tvr"] = it }
-        payload.applicationIdentifier?.let { resultMap["applicationIdentifier"] = it }
-        payload.cardIssuingBank?.let { resultMap["cardIssuingBank"] = it }
-        payload.panHash?.let { resultMap["panHash"] = it }
-        payload.applicationName?.let { resultMap["applicationName"] = it }
-        payload.authorizationCode?.let { resultMap["authorizationCode"] = it }
-        payload.installmentAmount?.let { resultMap["installmentAmount"] = it / 100.0 }
-        payload.nrOfInstallments?.let { resultMap["nrOfInstallments"] = it }
-        payload.mxFiid?.let { resultMap["mxFiid"] = it }
-        payload.mxCardType?.let { resultMap["mxCardType"] = it }
-
-        sendResult(true, resultMap)
-      }
-      is ZettleResult.Cancelled -> {
-        sendResult(false, mapOf("status" to "canceled"))
-      }
-      is ZettleResult.Failed -> {
-        sendResult(false, mapOf(
-          "status" to "failed",
-          "reason" to result.reason.toString()
-        ))
-      }
-      else -> {
-        sendResult(false, mapOf(
-          "status" to "unknown",
-          "errors" to "Unknown result type"
-        ))
-      }
-    }
-  }
-
-  private fun handleRefundResult(result: ZettleResult?) {
-    when (result) {
-      is ZettleResult.Completed<*> -> {
-        val refund: RefundResult.Completed = CardReaderAction.fromRefundResult(result)
-        val payload = refund.payload
+        val transaction = CardReaderAction.fromRetrieveTransactionResult(result)
+        val payload = transaction.payload
 
         sendResult(true, mapOf(
           "status" to "completed",
-          "originalAmount" to (payload.originalAmount / 100.0), // Convert cents back to dollars
-          "refundedAmount" to (payload.refundedAmount / 100.0), // Convert cents back to dollars
-          "cardType" to payload.cardType,
-          "maskedPan" to payload.maskedPan,
-          // Add other fields as needed
+          "amount" to payload.amount,
+          "referenceId" to payload.referenceId
+          // Add other fields you need from the payload
         ))
       }
       is ZettleResult.Cancelled -> {
@@ -385,34 +299,113 @@ class ZettlePlugin: FlutterPlugin, MethodCallHandler, ActivityAware {
           "reason" to result.reason.toString()
         ))
       }
-      else -> {
-        sendResult(false, mapOf(
-          "status" to "unknown",
-          "errors" to "Unknown result type"
-        ))
-      }
     }
   }
+}
 
-  // Helper method to send results back to Flutter
-  private fun sendResult(status: Boolean, message: Map<String, Any?>) {
-    val operation = pendingOperation
-    if (operation != null) {
-      pendingOperation = null
-      operation.result.success(mapOf(
-        "status" to status,
-        "message" to message,
-        "methodName" to operation.methodName
+private fun handlePaymentResult(result: ZettleResult?) {
+  when (result) {
+    is ZettleResult.Completed<*> -> {
+      val payment: CardPaymentResult.Completed = CardReaderAction.fromPaymentResult(result)
+      val payload = payment.payload
+
+      // Create a map with all possible fields
+      val resultMap = mutableMapOf<String, Any?>(
+        "status" to "completed",
+        "amount" to (payload.amount / 100.0),
+        "gratuityAmount" to (payload.gratuityAmount?.let { it / 100.0 }),
+        "cardType" to payload.cardType,
+        "cardPaymentEntryMode" to payload.cardPaymentEntryMode?.toString(),
+        "cardholderVerificationMethod" to payload.cardholderVerificationMethod?.toString(),
+        "maskedPan" to payload.maskedPan,
+        "reference" to payload.reference?.id
+      )
+
+      // Add all optional fields that might have changed in the SDK
+      payload.tsi?.let { resultMap["tsi"] = it }
+      payload.tvr?.let { resultMap["tvr"] = it }
+      payload.applicationIdentifier?.let { resultMap["applicationIdentifier"] = it }
+      payload.cardIssuingBank?.let { resultMap["cardIssuingBank"] = it }
+      payload.panHash?.let { resultMap["panHash"] = it }
+      payload.applicationName?.let { resultMap["applicationName"] = it }
+      payload.authorizationCode?.let { resultMap["authorizationCode"] = it }
+      payload.installmentAmount?.let { resultMap["installmentAmount"] = it / 100.0 }
+      payload.nrOfInstallments?.let { resultMap["nrOfInstallments"] = it }
+      payload.mxFiid?.let { resultMap["mxFiid"] = it }
+      payload.mxCardType?.let { resultMap["mxCardType"] = it }
+
+      sendResult(true, resultMap)
+    }
+    is ZettleResult.Cancelled -> {
+      sendResult(false, mapOf("status" to "canceled"))
+    }
+    is ZettleResult.Failed -> {
+      sendResult(false, mapOf(
+        "status" to "failed",
+        "reason" to result.reason.toString()
       ))
-      Log.d(tag, "Result sent for ${operation.methodName}: $status")
-    } else {
-      Log.e(tag, "No pending operation to send result to")
+    }
+    else -> {
+      sendResult(false, mapOf(
+        "status" to "unknown",
+        "errors" to "Unknown result type"
+      ))
     }
   }
+}
 
-  // Helper extension function to handle Parcelable extras in a version-compatible way
-  inline fun <reified T : android.os.Parcelable> Intent.parcelableExtra(key: String): T? = when {
-    Build.VERSION.SDK_INT >= 33 -> @Suppress("DEPRECATION") getParcelableExtra(key) as? T
-    else -> @Suppress("DEPRECATION") getParcelableExtra(key) as? T
+private fun handleRefundResult(result: ZettleResult?) {
+  when (result) {
+    is ZettleResult.Completed<*> -> {
+      val refund: RefundResult.Completed = CardReaderAction.fromRefundResult(result)
+      val payload = refund.payload
+
+      sendResult(true, mapOf(
+        "status" to "completed",
+        "originalAmount" to (payload.originalAmount / 100.0), // Convert cents back to dollars
+        "refundedAmount" to (payload.refundedAmount / 100.0), // Convert cents back to dollars
+        "cardType" to payload.cardType,
+        "maskedPan" to payload.maskedPan,
+        // Add other fields as needed
+      ))
+    }
+    is ZettleResult.Cancelled -> {
+      sendResult(false, mapOf("status" to "canceled"))
+    }
+    is ZettleResult.Failed -> {
+      sendResult(false, mapOf(
+        "status" to "failed",
+        "reason" to result.reason.toString()
+      ))
+    }
+    else -> {
+      sendResult(false, mapOf(
+        "status" to "unknown",
+        "errors" to "Unknown result type"
+      ))
+    }
   }
+}
+
+// Helper method to send results back to Flutter
+private fun sendResult(status: Boolean, message: Map<String, Any?>) {
+  val operation = pendingOperation
+  if (operation != null) {
+    pendingOperation = null
+    operation.result.success(mapOf(
+      "status" to status,
+      "message" to message,
+      "methodName" to operation.methodName
+    ))
+    Log.d(tag, "Result sent for ${operation.methodName}: $status")
+  } else {
+    Log.e(tag, "No pending operation to send result to")
+  }
+}
+
+// Helper extension function to handle Parcelable extras in a version-compatible way
+inline fun <reified T : android.os.Parcelable> Intent.parcelableExtra(key: String): T? = when {
+  Build.VERSION.SDK_INT >= 33 -> @Suppress("DEPRECATION") getParcelableExtra(key) as? T
+  else -> @Suppress("DEPRECATION") getParcelableExtra(key) as? T
+}
 }
